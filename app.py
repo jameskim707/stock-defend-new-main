@@ -20,7 +20,7 @@ import io
 import os
 from difflib import SequenceMatcher
 
-st.set_page_config(page_title="GINI Guardian v4.6.4 COMPLETE", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="GINI Guardian v4.7.1 FINAL", page_icon="🛡️", layout="wide")
 
 # Groq API 설정
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
@@ -527,6 +527,19 @@ def delete_portfolio_stock(ticker):
     # 캐시 무효화
     load_portfolio_from_db.clear()
 
+def update_portfolio_stock(ticker, buy_price, quantity):
+    """기존 포트폴리오 종목의 매입가와 수량 수정"""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    UPDATE portfolio
+    SET buy_price = ?, quantity = ?
+    WHERE ticker = ?
+    """, (buy_price, quantity, ticker))
+    conn.commit()
+    conn.close()
+    load_portfolio_from_db.clear()
+
 create_tables()
 
 # ============================================================================
@@ -638,6 +651,35 @@ def detect_risk_level(risk_score):
     else:
         return "low"
 
+def calculate_behavior_risk(user_input, tags):
+    """질문의 실제 거래 행동과 감정 표현을 바탕으로 0~10 위험도를 계산한다."""
+    text = (user_input or "").lower().replace(" ", "")
+    score = 3.0
+
+    # 실제 거래 행동
+    if any(word in text for word in ["추가매수", "추매", "물타기", "불타기"]):
+        score = max(score, 5.8)
+    if any(word in text for word in ["지금사", "당장사", "급등", "놓칠", "늦었"]):
+        score = max(score, 7.0)
+    if any(word in text for word in ["복구", "만회", "본전"]):
+        score = max(score, 7.8)
+    if any(word in text for word in ["대출", "빚", "신용", "미수", "몰빵", "전재산"]):
+        score = max(score, 9.0)
+
+    # 감정 태그 보정
+    tag_floor = {
+        "불안": 5.5, "분노": 6.0, "충동": 6.5, "후회": 5.5,
+        "탐욕": 6.5, "공포": 7.0, "FOMO": 7.2,
+        "자포자기": 8.0, "우울": 6.0, "흥분": 6.0,
+    }
+    for tag in tags:
+        score = max(score, tag_floor.get(tag, 3.0))
+
+    if "냉정" in tags and not any(tag in tags for tag in ["충동", "FOMO", "자포자기"]):
+        score = min(score, 3.5)
+
+    return round(min(10.0, max(0.0, score)), 1)
+
 def detect_tags(user_input):
     """감정 태그 12종 감지"""
     tags = []
@@ -706,7 +748,7 @@ PRESSURE_MESSAGES = {
         "message": """
 **심리 상태가 불안정해 보입니다. 지금은 계획과 위험 한도를 다시 확인하세요.**
 
-탐욕에 의한 추가 매수의 87%는 더 큰 손실로 이어집니다. (행동경제학 연구 결과)
+계획에 없던 추가 매수는 투자금과 손실 가능성을 함께 키울 수 있습니다.
 
 **오늘의 감정 상태로는 합리적 결정을 내리기 어렵습니다.**
 
@@ -1825,8 +1867,8 @@ if 'guardian_chat_history' not in st.session_state:
 # 🌟 메인 UI
 # ============================================================================
 
-st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.6.4 COMPLETE</div>', unsafe_allow_html=True)
-st.caption("빌드 2026-09-02 · 종목 안내/경고 분리 · 답변 끊김 방지")
+st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.7.1 FINAL</div>', unsafe_allow_html=True)
+st.caption("빌드 2026-09-02 · 동적 위험지표 · 포트폴리오 수정 · 답변 끊김 방지")
 st.markdown('<div style="text-align: center; margin-bottom: 20px;"><span class="hot-badge" style="font-size: 1.2em; color: #ff4500;">NEW! Groq 대화형 상담 🔥</span></div>', unsafe_allow_html=True)
 
 # ============================================================================
@@ -1856,8 +1898,9 @@ with tab1:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
             <p style="color: white; font-size: 1.1em; margin: 0; text-align: center; line-height: 1.6;">
-            안녕하세요. 저는 <strong>감정에 흔들린 투자 결정을 막아주는</strong><br>
-            <strong>'주식 과잉방지 AI 상담가'</strong>입니다.<br>
+            안녕하세요.<br>
+            저는 <strong>감정에 흔들리는 투자 결정을 막아주는</strong><br>
+            <strong>'주식 과잉투자 방지 AI 상담가'</strong>입니다.<br>
             <br>
             지금 당신의 심리·상황을 함께 점검하며<br>
             <strong>안전한 투자를 돕겠습니다.</strong> 🛡️<br>
@@ -1941,13 +1984,12 @@ with tab1:
                 with st.spinner("🤔 AI가 분석 중..."):
                     response, emotion_score = groq_counsel_chat(messages)
                     
-                    # 위험도 계산
-                    volatility_score = 5.0
-                    news_score = 3.0
-                    risk = calc_risk_score(emotion_score, volatility_score, news_score)
+                    # 질문의 실제 거래 행동과 감정 표현으로 위험도를 계산
+                    tags = detect_tags(user_input)
+                    risk = calculate_behavior_risk(user_input, tags)
+                    emotion_score = risk
                     risk_emoji = get_risk_emoji(risk)
                     risk_level = detect_risk_level(risk)
-                    tags = detect_tags(user_input)
                     
                     # 위험한 순간 기록
                     if risk >= 6.5:
@@ -2374,6 +2416,36 @@ with tab4:
                     delete_portfolio_stock(stock['종목코드'])
                     st.session_state.portfolio = [p for p in st.session_state.portfolio if p['종목코드'] != stock['종목코드']]
                     st.rerun()
+
+            with st.expander(f"✏️ {stock['종목명']} 매입가·수량 수정"):
+                edit_col1, edit_col2, edit_col3 = st.columns([2, 2, 1])
+                with edit_col1:
+                    edited_buy_price = st.number_input(
+                        "매입가",
+                        min_value=1,
+                        value=int(stock["매입가"]),
+                        step=100,
+                        key=f"edit_price_{stock['종목코드']}",
+                    )
+                with edit_col2:
+                    edited_quantity = st.number_input(
+                        "수량",
+                        min_value=1,
+                        value=int(stock["수량"]),
+                        step=1,
+                        key=f"edit_quantity_{stock['종목코드']}",
+                    )
+                with edit_col3:
+                    st.write("")
+                    st.write("")
+                    if st.button("💾 저장", key=f"save_edit_{stock['종목코드']}", use_container_width=True):
+                        update_portfolio_stock(stock['종목코드'], edited_buy_price, edited_quantity)
+                        for item in st.session_state.portfolio:
+                            if item['종목코드'] == stock['종목코드']:
+                                item['매입가'] = edited_buy_price
+                                item['수량'] = edited_quantity
+                        st.success("수정했습니다.")
+                        st.rerun()
         
         st.divider()
         
@@ -2403,6 +2475,13 @@ with tab4:
         
         if submitted:
             if new_ticker and new_name and new_buy_price > 0:
+                new_ticker = new_ticker.strip()
+                new_name = new_name.strip()
+
+                if any(item['종목코드'] == new_ticker for item in st.session_state.portfolio):
+                    st.warning("⚠️ 이미 등록된 종목입니다. 위의 수정 버튼을 이용해주세요.")
+                    st.stop()
+
                 save_portfolio_stock(new_ticker, new_name, new_buy_price, new_quantity)
                 
                 st.session_state.portfolio.append({
@@ -2425,7 +2504,7 @@ with tab5:
     st.subheader("⚙️ 설정 & 정보")
     
     st.info(f"""
-    **GINI Guardian v4.6.4 COMPLETE**
+    **GINI Guardian v4.7.1 FINAL**
     
     🆕 v4.4 라이라 피드백 반영:
        -  **톤 통일**: 전문적이고 객관적인 중간 톤으로 통일
