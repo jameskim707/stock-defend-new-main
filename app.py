@@ -20,7 +20,7 @@ import io
 import os
 from difflib import SequenceMatcher
 
-st.set_page_config(page_title="GINI Guardian v4.6 Stable", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="GINI Guardian v4.6.4 COMPLETE", page_icon="🛡️", layout="wide")
 
 # Groq API 설정
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
@@ -1578,7 +1578,7 @@ def get_strong_warning(risk_level):
 # 🤖 Groq 상담 함수
 # ============================================================================
 
-def build_guardian_system_prompt():
+def build_guardian_system_prompt(user_input=""):
     """포트폴리오 기반 System Prompt 생성"""
     
     # 포트폴리오 정보
@@ -1604,20 +1604,41 @@ def build_guardian_system_prompt():
             for emotion, count in top_emotions:
                 recent_emotions += f"- {emotion} ({count}회)\n"
     
-    prompt = f"""당신은 GINI Guardian의 전문 투자 심리 상담가입니다.
+    danger_words = ["몰빵", "전재산", "대출", "빚", "복구", "만회", "본전", "급등", "놓칠"]
+    is_risky_request = has_explicit_trade_intent(user_input) and any(
+        word in (user_input or "").lower() for word in danger_words
+    )
+
+    if is_risky_request:
+        mode_instruction = """
+[현재 모드: 과잉투자 방지]
+- 충동매수, 빚투, 몰빵, 손실 만회 거래의 위험을 분명하게 경고하세요.
+- 매수 보류, 금액 축소, 24시간 숙려 등 구체적인 안전 행동을 제시하세요.
+- 이 모드에서만 '잠시 멈추는 것이 좋습니다' 같은 경고 문구를 사용하세요.
+"""
+    else:
+        mode_instruction = """
+[현재 모드: 일반 투자 안내]
+- 사용자의 질문에 먼저 직접 답하세요. 무조건 투자하지 말라거나 심리가 불안하다고 말하지 마세요.
+- 종목 추천 요청이면 국내외에서 검토할 만한 업종과 대표 종목 후보 2~4개를 제시하세요.
+- 각 후보가 좋은 이유와 나쁜 점(핵심 위험)을 함께 설명하고, 어느 유형의 투자자에게 맞는지 비교하세요.
+- 특정 종목 질문이면 성장성, 실적, 밸류에이션, 업황, 주요 위험 관점에서 장단점을 설명하세요.
+- 실시간 가격이나 최신 실적을 확인하지 못했다면 아는 척하지 말고 '현재 수치는 별도 확인 필요'라고 짧게 밝히세요.
+- 마지막에는 사용자가 선택할 수 있도록 1개의 후속 질문을 하세요.
+"""
+
+    prompt = f"""당신은 GINI Guardian의 투자 안내 및 과잉투자 방지 상담가입니다.
 
 **핵심 원칙:**
-1. 감정적 투자를 막고 합리적 판단을 돕기
-2. 전문적이고 명확한 조언 (3-5문장)
-3. 과도한 위험이 보이면 강력히 경고
-4. 구체적이고 실행 가능한 조언
+1. 일반 투자 질문에는 업종·종목 후보와 비교 정보를 실용적으로 제공
+2. 위험한 거래 의도가 명확할 때만 과잉투자 경고
+3. 근거 없는 수익 보장이나 확정 표현은 금지
+4. 한국어로 이해하기 쉽게 5~8문장으로 답변
 
-**경고 문구 사용:**
-- "지금은 투자 결정을 잠시 멈추는 것이 좋습니다"
-- "심리 상태가 불안정합니다"
-- "감정적 투자는 금물입니다"
+{mode_instruction}
 {portfolio_info}{recent_emotions}
-**짧고 명확하게 답변하세요.**"""
+사용자의 현재 질문: {user_input}
+"""
     
     return prompt
 
@@ -1627,12 +1648,13 @@ def local_guardian_fallback(user_text, reason=""):
 
     if any(word in text for word in ["어디", "종목", "추천", "뭘 사", "무엇을 사"]):
         answer = (
-            "특정 종목을 바로 고르기보다 지금은 매수를 잠시 멈추는 편이 좋습니다. "
-            "먼저 투자 목적과 보유 기간, 감당 가능한 손실 한도를 적고 그 기준을 통과한 종목만 검토하세요. "
-            "추가매수 전에는 한 종목 비중이 전체 투자금의 20%를 넘지 않는지, 비상자금이 별도로 남아 있는지도 확인해보세요. "
-            "지금 꼭 사고 싶다면 오늘은 주문하지 말고 관심 목록에만 넣은 뒤 내일 다시 판단하세요."
+            "현재 검토 후보로는 반도체의 삼성전자·SK하이닉스, 자동차의 현대차, "
+            "시장 전체에 분산하는 KODEX 200 같은 ETF를 예로 들 수 있습니다. "
+            "반도체는 AI 수요의 수혜 가능성이 있지만 업황 변동이 크고, 현대차는 실적과 주주환원이 강점이지만 "
+            "환율·관세·경기 영향을 받습니다. ETF는 개별 종목 위험을 줄이는 대신 특정 종목의 큰 상승폭은 덜 반영됩니다. "
+            "현재 가격과 최신 실적은 별도 확인이 필요합니다. 안정형인지 성장형인지 알려주시면 후보를 더 좁혀드릴게요."
         )
-        score = 5.5
+        score = 3.5
     elif any(word in text for word in ["추가매수", "물타기", "평단", "더 살"]):
         answer = (
             "추가매수는 손실을 줄이는 방법이 아니라 투자금과 위험을 함께 늘리는 결정입니다. "
@@ -1689,7 +1711,10 @@ def groq_counsel_chat(messages):
                 "model": "openai/gpt-oss-20b",
                 "messages": messages,
                 "temperature": 0.7,
-                "max_tokens": 500,
+                # GPT-OSS는 내부 추론도 출력 한도에 포함하므로 여유 있게 설정한다.
+                "max_completion_tokens": 1400,
+                "reasoning_effort": "low",
+                "include_reasoning": False,
             },
             timeout=40,
         )
@@ -1754,7 +1779,9 @@ def groq_counsel(user_text):
                 "model": "openai/gpt-oss-20b",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
-                "max_tokens": 500,
+                "max_completion_tokens": 1400,
+                "reasoning_effort": "low",
+                "include_reasoning": False,
             },
             timeout=40,
         )
@@ -1798,7 +1825,8 @@ if 'guardian_chat_history' not in st.session_state:
 # 🌟 메인 UI
 # ============================================================================
 
-st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.6 Stable</div>', unsafe_allow_html=True)
+st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.6.4 COMPLETE</div>', unsafe_allow_html=True)
+st.caption("빌드 2026-09-02 · 종목 안내/경고 분리 · 답변 끊김 방지")
 st.markdown('<div style="text-align: center; margin-bottom: 20px;"><span class="hot-badge" style="font-size: 1.2em; color: #ff4500;">NEW! Groq 대화형 상담 🔥</span></div>', unsafe_allow_html=True)
 
 # ============================================================================
@@ -1896,7 +1924,7 @@ with tab1:
                 st.write(user_input)
             
             # System Prompt 생성
-            system_prompt = build_guardian_system_prompt()
+            system_prompt = build_guardian_system_prompt(user_input)
             
             # 메시지 구성
             recent_history = st.session_state.guardian_chat_history[-10:]
@@ -2397,7 +2425,7 @@ with tab5:
     st.subheader("⚙️ 설정 & 정보")
     
     st.info(f"""
-    **GINI Guardian v4.6 Stable**
+    **GINI Guardian v4.6.4 COMPLETE**
     
     🆕 v4.4 라이라 피드백 반영:
        -  **톤 통일**: 전문적이고 객관적인 중간 톤으로 통일
