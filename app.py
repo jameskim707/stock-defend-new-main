@@ -20,7 +20,7 @@ import io
 import os
 from difflib import SequenceMatcher
 
-st.set_page_config(page_title="GINI Guardian v4.7.1 FINAL", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="GINI Guardian v4.7.2 MOBILE", page_icon="🛡️", layout="wide")
 
 # Groq API 설정
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
@@ -142,6 +142,72 @@ h1, h2, h3, h4, h5, h6 {
 
 p, div, span, label {
     color: var(--text-dark) !important;
+}
+
+/* 메인 소개 배너: 모바일에서 한글 단어가 중간 분리되지 않도록 처리 */
+.guardian-intro {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 22px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    text-align: center;
+    color: white !important;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+
+.guardian-intro, .guardian-intro * {
+    color: white !important;
+}
+
+.guardian-intro .intro-hello {
+    font-size: 1.2rem;
+    margin-bottom: 8px;
+}
+
+.guardian-intro .intro-purpose,
+.guardian-intro .intro-new {
+    margin-top: 16px;
+}
+
+.guardian-intro .intro-new {
+    font-weight: 700;
+}
+
+@media (max-width: 768px) {
+    .block-container {
+        padding: 1rem 0.75rem 4rem !important;
+    }
+
+    .header-animated {
+        font-size: 1.45rem !important;
+        line-height: 1.25 !important;
+        white-space: normal !important;
+        word-break: keep-all !important;
+    }
+
+    .guardian-intro {
+        padding: 18px 14px;
+        font-size: 0.98rem;
+        line-height: 1.65;
+    }
+
+    .guardian-intro .intro-hello {
+        font-size: 1.08rem;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        flex: 0 0 auto;
+        padding-left: 0.65rem !important;
+        padding-right: 0.65rem !important;
+    }
 }
 
 </style>
@@ -1867,7 +1933,7 @@ if 'guardian_chat_history' not in st.session_state:
 # 🌟 메인 UI
 # ============================================================================
 
-st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.7.1 FINAL</div>', unsafe_allow_html=True)
+st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.7.2 MOBILE</div>', unsafe_allow_html=True)
 st.caption("빌드 2026-09-02 · 동적 위험지표 · 포트폴리오 수정 · 답변 끊김 방지")
 st.markdown('<div style="text-align: center; margin-bottom: 20px;"><span class="hot-badge" style="font-size: 1.2em; color: #ff4500;">NEW! Groq 대화형 상담 🔥</span></div>', unsafe_allow_html=True)
 
@@ -1896,17 +1962,13 @@ with tab1:
     else:
         # 인트로 배너
         st.markdown("""
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-            <p style="color: white; font-size: 1.1em; margin: 0; text-align: center; line-height: 1.6;">
-            안녕하세요.<br>
-            저는 <strong>감정에 흔들리는 투자 결정을 막아주는</strong><br>
-            <strong>'주식 과잉투자 방지 AI 상담가'</strong>입니다.<br>
-            <br>
-            지금 당신의 심리·상황을 함께 점검하며<br>
-            <strong>안전한 투자를 돕겠습니다.</strong> 🛡️<br>
-            <br>
-            <strong>✨ NEW! 계속 대화가 가능합니다!</strong>
-            </p>
+        <div class="guardian-intro">
+            <div class="intro-hello">안녕하세요.</div>
+            <div>저는 <strong>감정에 흔들리는 투자 결정을 막아주는<br>
+            ‘주식 과잉투자 방지 AI 상담가’</strong>입니다.</div>
+            <div class="intro-purpose">지금 당신의 심리와 상황을 함께 점검하며<br>
+            <strong>안전한 투자를 돕겠습니다.</strong> 🛡️</div>
+            <div class="intro-new">✨ 계속 대화할 수 있습니다.</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -2504,7 +2566,7 @@ with tab5:
     st.subheader("⚙️ 설정 & 정보")
     
     st.info(f"""
-    **GINI Guardian v4.7.1 FINAL**
+    **GINI Guardian v4.7.2 MOBILE**
     
     🆕 v4.4 라이라 피드백 반영:
        -  **톤 통일**: 전문적이고 객관적인 중간 톤으로 통일
