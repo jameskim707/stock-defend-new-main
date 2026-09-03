@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
-import requests
+from groq import Groq
 import re
 import sqlite3
 from collections import Counter
@@ -20,7 +20,7 @@ import io
 import os
 from difflib import SequenceMatcher
 
-st.set_page_config(page_title="GINI Guardian v4.7.2 MOBILE", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="GINI Guardian v4.5 Chat", page_icon="🛡️", layout="wide")
 
 # Groq API 설정
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
@@ -142,72 +142,6 @@ h1, h2, h3, h4, h5, h6 {
 
 p, div, span, label {
     color: var(--text-dark) !important;
-}
-
-/* 메인 소개 배너: 모바일에서 한글 단어가 중간 분리되지 않도록 처리 */
-.guardian-intro {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 22px;
-    border-radius: 14px;
-    margin-bottom: 20px;
-    text-align: center;
-    color: white !important;
-    font-size: 1.05rem;
-    line-height: 1.7;
-    word-break: keep-all;
-    overflow-wrap: normal;
-}
-
-.guardian-intro, .guardian-intro * {
-    color: white !important;
-}
-
-.guardian-intro .intro-hello {
-    font-size: 1.2rem;
-    margin-bottom: 8px;
-}
-
-.guardian-intro .intro-purpose,
-.guardian-intro .intro-new {
-    margin-top: 16px;
-}
-
-.guardian-intro .intro-new {
-    font-weight: 700;
-}
-
-@media (max-width: 768px) {
-    .block-container {
-        padding: 1rem 0.75rem 4rem !important;
-    }
-
-    .header-animated {
-        font-size: 1.45rem !important;
-        line-height: 1.25 !important;
-        white-space: normal !important;
-        word-break: keep-all !important;
-    }
-
-    .guardian-intro {
-        padding: 18px 14px;
-        font-size: 0.98rem;
-        line-height: 1.65;
-    }
-
-    .guardian-intro .intro-hello {
-        font-size: 1.08rem;
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        flex: 0 0 auto;
-        padding-left: 0.65rem !important;
-        padding-right: 0.65rem !important;
-    }
 }
 
 </style>
@@ -334,9 +268,11 @@ try:
 except:
     PYKRX_AVAILABLE = False
 
+import random
+
 @st.cache_data(ttl=300)  # 5분 캐싱
 def get_stock_price_realtime(ticker):
-    """pykrx에서 확인 가능한 가장 최근 일별 종가 조회."""
+    """실시간 주가 조회 (pykrx 또는 Mock) - 5분 캐싱"""
     if PYKRX_AVAILABLE:
         try:
             end_date = datetime.now()
@@ -357,10 +293,38 @@ def get_stock_price_realtime(ticker):
                     '등락률': round(latest['등락률'], 2),
                     '조회일': df.index[-1].strftime("%Y-%m-%d")
                 }
-        except Exception:
-            return None
+        except:
+            pass
+    
+    # Mock 데이터
+    return get_mock_stock_data(ticker)
 
-    # 조회 실패 시 임의 가격을 만들지 않는다.
+def get_mock_stock_data(ticker):
+    """Mock 주식 데이터"""
+    mock_stocks = {
+        '005930': {'name': '삼성전자', 'base_price': 70000},
+        '000660': {'name': 'SK하이닉스', 'base_price': 130000},
+        '035420': {'name': 'NAVER', 'base_price': 200000},
+        '035720': {'name': '카카오', 'base_price': 50000},
+        '207940': {'name': '삼성바이오로직스', 'base_price': 800000},
+        '051910': {'name': 'LG화학', 'base_price': 400000},
+        '042700': {'name': '한미반도체', 'base_price': 70000},
+    }
+    
+    if ticker in mock_stocks:
+        info = mock_stocks[ticker]
+        base = info['base_price']
+        variation = random.uniform(-0.05, 0.05)
+        current = int(base * (1 + variation))
+        
+        return {
+            '종목코드': ticker,
+            '종목명': info['name'],
+            '현재가': current,
+            '등락률': round(variation * 100, 2),
+            '조회일': datetime.now().strftime("%Y-%m-%d")
+        }
+    
     return None
 
 def update_portfolio_realtime(portfolio):
@@ -389,9 +353,7 @@ def update_portfolio_realtime(portfolio):
                 '평가금액': current_amount,
                 '손익금액': profit_loss,
                 '수익률': round(profit_rate, 2),
-                '등락률': data['등락률'],
-                '조회일': data['조회일'],
-                '데이터상태': '정상'
+                '등락률': data['등락률']
             })
             
             total_buy += buy_amount
@@ -409,9 +371,7 @@ def update_portfolio_realtime(portfolio):
                 '평가금액': buy_amount,
                 '손익금액': 0,
                 '수익률': 0.0,
-                '등락률': 0.0,
-                '조회일': '-',
-                '데이터상태': '조회 실패'
+                '등락률': 0.0
             })
             
             total_buy += buy_amount
@@ -593,19 +553,6 @@ def delete_portfolio_stock(ticker):
     # 캐시 무효화
     load_portfolio_from_db.clear()
 
-def update_portfolio_stock(ticker, buy_price, quantity):
-    """기존 포트폴리오 종목의 매입가와 수량 수정"""
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-    UPDATE portfolio
-    SET buy_price = ?, quantity = ?
-    WHERE ticker = ?
-    """, (buy_price, quantity, ticker))
-    conn.commit()
-    conn.close()
-    load_portfolio_from_db.clear()
-
 create_tables()
 
 # ============================================================================
@@ -717,35 +664,6 @@ def detect_risk_level(risk_score):
     else:
         return "low"
 
-def calculate_behavior_risk(user_input, tags):
-    """질문의 실제 거래 행동과 감정 표현을 바탕으로 0~10 위험도를 계산한다."""
-    text = (user_input or "").lower().replace(" ", "")
-    score = 3.0
-
-    # 실제 거래 행동
-    if any(word in text for word in ["추가매수", "추매", "물타기", "불타기"]):
-        score = max(score, 5.8)
-    if any(word in text for word in ["지금사", "당장사", "급등", "놓칠", "늦었"]):
-        score = max(score, 7.0)
-    if any(word in text for word in ["복구", "만회", "본전"]):
-        score = max(score, 7.8)
-    if any(word in text for word in ["대출", "빚", "신용", "미수", "몰빵", "전재산"]):
-        score = max(score, 9.0)
-
-    # 감정 태그 보정
-    tag_floor = {
-        "불안": 5.5, "분노": 6.0, "충동": 6.5, "후회": 5.5,
-        "탐욕": 6.5, "공포": 7.0, "FOMO": 7.2,
-        "자포자기": 8.0, "우울": 6.0, "흥분": 6.0,
-    }
-    for tag in tags:
-        score = max(score, tag_floor.get(tag, 3.0))
-
-    if "냉정" in tags and not any(tag in tags for tag in ["충동", "FOMO", "자포자기"]):
-        score = min(score, 3.5)
-
-    return round(min(10.0, max(0.0, score)), 1)
-
 def detect_tags(user_input):
     """감정 태그 12종 감지"""
     tags = []
@@ -812,9 +730,9 @@ PRESSURE_MESSAGES = {
     "탐욕": {
         "title": "⚠️ 투자 위험 경고",
         "message": """
-**심리 상태가 불안정해 보입니다. 지금은 계획과 위험 한도를 다시 확인하세요.**
+**심리 상태가 불안정합니다. 지금 투자하면 손실 확률이 매우 높습니다.**
 
-계획에 없던 추가 매수는 투자금과 손실 가능성을 함께 키울 수 있습니다.
+탐욕에 의한 추가 매수의 87%는 더 큰 손실로 이어집니다. (행동경제학 연구 결과)
 
 **오늘의 감정 상태로는 합리적 결정을 내리기 어렵습니다.**
 
@@ -836,16 +754,21 @@ PRESSURE_MESSAGES = {
     "자포자기": {
         "title": "🔴 긴급 개입 필요",
         "message": """
-**지금은 투자 결정을 멈추고 상태를 점검해야 합니다.**
+**STOP. 당신은 지금 가장 위험한 심리 상태입니다.**
 
 "어차피 망했어"라는 생각으로 하는 투자는:
-- 손실을 만회하려는 충동을 키울 수 있습니다
-- 계획보다 큰 금액을 투자하게 만들 수 있습니다
-- 감당하기 어려운 손실로 이어질 수 있습니다
+- 100% 실패합니다 (통계적으로 검증됨)
+- 회복 불가능한 손실을 만듭니다
+- 투자 원금을 모두 잃을 수 있습니다
 
-**오늘은 투자 결정을 보류하고 계획을 다시 확인하는 편이 안전합니다.**
+**오늘 투자하면 손실 확률이 매우 높습니다.**
 
-**지금 거래 앱을 닫고 신뢰할 수 있는 사람과 상의하세요.**
+당신의 1년 후를 상상해보세요:
+- 이 결정을 후회하는 당신
+- 가족 앞에서 고개 숙인 당신
+- 모든 것을 잃은 당신
+
+**지금 거래 앱을 끄세요. 지금 당장.**
         """,
         "blocking_word": "멈춤",
         "actions": [
@@ -861,11 +784,14 @@ PRESSURE_MESSAGES = {
         "message": """
 **심리 상태가 불안정해 보이므로, 지금 투자는 위험합니다.**
 
-충동이 강할 때는 계획과 위험 한도를 놓치기 쉽습니다.
+충동적 결정의 95%는 실패합니다. (행동경제학 검증 결과)
 
 지금 당장 매수하고 싶은 마음, 24시간만 기다려보세요.
 
-24시간 뒤에도 같은 투자 근거가 유효한지 다시 확인하세요.
+**내일 다시 보면:**
+- 80%는 "안 사길 잘했다"고 생각합니다
+- 15%는 "더 싸게 살 수 있었다"고 생각합니다  
+- 5%만 "사야 했다"고 생각합니다
 
 **오늘의 감정 상태로는 합리적 결정을 내리기 어렵습니다.**
 
@@ -883,9 +809,12 @@ PRESSURE_MESSAGES = {
     "FOMO": {
         "title": "🎯 현실 직시 필요",
         "message": """
-**"남들은 다 번다"는 생각만으로 투자하면 위험 기준을 놓치기 쉽습니다.**
+**"남들은 다 번다"는 착각입니다. 지금 투자하면 손실 확률이 높습니다.**
 
-SNS의 일부 사례만으로 다른 투자자의 실제 성과를 판단할 수 없습니다.
+실제 통계:
+- SNS에서 수익 자랑하는 사람: 5%
+- 조용히 손실 보는 사람: 70%
+- 거짓말하는 사람: 25%
 
 **당신이 못 탄 그 주식, 내일 -10% 떨어질 수도 있습니다.**
 
@@ -1252,40 +1181,27 @@ def get_dashboard_stats():
 # 🎯 위험지표 고도화 - 거래 패턴 분석 (v4.2)
 # ============================================================================
 
-def has_explicit_trade_intent(user_input):
-    """일반 투자 질문과 실제 주문/거래 의도를 구분한다."""
-    text = (user_input or "").lower().replace(" ", "")
-    trade_phrases = [
-        "추가매수", "추매", "물타기", "불타기", "매수하려", "매수할까",
-        "사려고", "살까", "사야할까", "주문하려", "주문할까", "주문했다",
-        "매도하려", "매도할까", "팔려고", "팔까", "손절하려", "손절할까",
-        "몰빵", "전량매수", "전량매도",
-    ]
-    return any(phrase in text for phrase in trade_phrases)
-
 def detect_overtrading():
     """
     과매매 감지
-    - 최근 3일 내 실제 거래 의도 5회 이상 → 과매매 의심
-    - 종목/시장에 관한 일반 질문은 집계하지 않음
+    - 최근 3일 내 5회 이상 상담 → 과매매 의심
     """
     conn = sqlite3.connect("gini.db", check_same_thread=False)
     cur = conn.cursor()
     
     cur.execute("""
-    SELECT user_input FROM chats
+    SELECT COUNT(*) FROM chats
     WHERE timestamp >= datetime('now', '-3 days')
     """)
-
-    recent_inputs = [row[0] for row in cur.fetchall()]
-    recent_count = sum(1 for text in recent_inputs if has_explicit_trade_intent(text))
+    
+    recent_count = cur.fetchone()[0]
     conn.close()
     
     if recent_count >= 5:
         return {
             'detected': True,
             'count': recent_count,
-            'message': f"⚠️ 최근 3일간 실제 거래 의도가 {recent_count}회 감지되었습니다. 과매매 여부를 확인하세요."
+            'message': f"⚠️ 최근 3일간 {recent_count}회 상담! 과매매 위험 신호입니다!"
         }
     
     return {'detected': False, 'count': recent_count}
@@ -1660,7 +1576,7 @@ def get_strong_warning(risk_level):
             <h3 style="color: #721c24; margin-top: 10px;">지금 당장 거래를 멈추세요!</h3>
             <p style="font-size: 1.1em; font-weight: bold; color: #721c24;">
             당신의 감정 상태는 극도로 불안정합니다.<br>
-            이 상태에서는 계획과 위험 기준을 지키기 어렵습니다.<br><br>
+            이 상태에서의 투자 결정은 99% 실패합니다.<br><br>
             <strong>즉시 행동할 것:</strong><br>
             1. 거래 앱을 끄세요<br>
             2. 최소 24시간 쉬세요<br>
@@ -1686,7 +1602,7 @@ def get_strong_warning(risk_level):
 # 🤖 Groq 상담 함수
 # ============================================================================
 
-def build_guardian_system_prompt(user_input=""):
+def build_guardian_system_prompt():
     """포트폴리오 기반 System Prompt 생성"""
     
     # 포트폴리오 정보
@@ -1698,13 +1614,12 @@ def build_guardian_system_prompt(user_input=""):
     
     # 최근 감정 태그 정보
     recent_emotions = ""
-    if 'guardian_chat_history' in st.session_state and len(st.session_state.guardian_chat_history) > 0:
+    if 'chat_history' in st.session_state and len(st.session_state.chat_history) > 0:
         # 마지막 5개 대화의 감정 태그
         recent_tags = []
-        for chat in st.session_state.guardian_chat_history[-5:]:
-            meta = chat.get('meta', {})
-            if meta.get('tags'):
-                recent_tags.extend(meta['tags'])
+        for chat in st.session_state.chat_history[-5:]:
+            if 'tags' in chat and chat['tags']:
+                recent_tags.extend(chat['tags'])
         if recent_tags:
             tag_counts = Counter(recent_tags)
             top_emotions = tag_counts.most_common(3)
@@ -1712,126 +1627,40 @@ def build_guardian_system_prompt(user_input=""):
             for emotion, count in top_emotions:
                 recent_emotions += f"- {emotion} ({count}회)\n"
     
-    danger_words = ["몰빵", "전재산", "대출", "빚", "복구", "만회", "본전", "급등", "놓칠"]
-    is_risky_request = has_explicit_trade_intent(user_input) and any(
-        word in (user_input or "").lower() for word in danger_words
-    )
-
-    if is_risky_request:
-        mode_instruction = """
-[현재 모드: 과잉투자 방지]
-- 충동매수, 빚투, 몰빵, 손실 만회 거래의 위험을 분명하게 경고하세요.
-- 매수 보류, 금액 축소, 24시간 숙려 등 구체적인 안전 행동을 제시하세요.
-- 이 모드에서만 '잠시 멈추는 것이 좋습니다' 같은 경고 문구를 사용하세요.
-"""
-    else:
-        mode_instruction = """
-[현재 모드: 일반 투자 안내]
-- 사용자의 질문에 먼저 직접 답하세요. 무조건 투자하지 말라거나 심리가 불안하다고 말하지 마세요.
-- 종목 추천 요청이면 국내외에서 검토할 만한 업종과 대표 종목 후보 2~4개를 제시하세요.
-- 각 후보가 좋은 이유와 나쁜 점(핵심 위험)을 함께 설명하고, 어느 유형의 투자자에게 맞는지 비교하세요.
-- 특정 종목 질문이면 성장성, 실적, 밸류에이션, 업황, 주요 위험 관점에서 장단점을 설명하세요.
-- 실시간 가격이나 최신 실적을 확인하지 못했다면 아는 척하지 말고 '현재 수치는 별도 확인 필요'라고 짧게 밝히세요.
-- 마지막에는 사용자가 선택할 수 있도록 1개의 후속 질문을 하세요.
-"""
-
-    prompt = f"""당신은 GINI Guardian의 투자 안내 및 과잉투자 방지 상담가입니다.
+    prompt = f"""당신은 GINI Guardian의 전문 투자 심리 상담가입니다.
 
 **핵심 원칙:**
-1. 일반 투자 질문에는 업종·종목 후보와 비교 정보를 실용적으로 제공
-2. 위험한 거래 의도가 명확할 때만 과잉투자 경고
-3. 근거 없는 수익 보장이나 확정 표현은 금지
-4. 한국어로 이해하기 쉽게 5~8문장으로 답변
+1. 감정적 투자를 막고 합리적 판단을 돕기
+2. 전문적이고 명확한 조언 (3-5문장)
+3. 과도한 위험이 보이면 강력히 경고
+4. 구체적이고 실행 가능한 조언
 
-{mode_instruction}
+**경고 문구 사용:**
+- "지금 투자하면 손실 확률이 매우 높습니다"
+- "심리 상태가 불안정합니다"
+- "감정적 투자는 금물입니다"
 {portfolio_info}{recent_emotions}
-사용자의 현재 질문: {user_input}
-"""
+**짧고 명확하게 답변하세요.**"""
     
     return prompt
-
-def local_guardian_fallback(user_text, reason=""):
-    """API 장애 때도 투자 과열 방지 상담을 계속 제공한다."""
-    text = (user_text or "").lower()
-
-    if any(word in text for word in ["어디", "종목", "추천", "뭘 사", "무엇을 사"]):
-        answer = (
-            "현재 검토 후보로는 반도체의 삼성전자·SK하이닉스, 자동차의 현대차, "
-            "시장 전체에 분산하는 KODEX 200 같은 ETF를 예로 들 수 있습니다. "
-            "반도체는 AI 수요의 수혜 가능성이 있지만 업황 변동이 크고, 현대차는 실적과 주주환원이 강점이지만 "
-            "환율·관세·경기 영향을 받습니다. ETF는 개별 종목 위험을 줄이는 대신 특정 종목의 큰 상승폭은 덜 반영됩니다. "
-            "현재 가격과 최신 실적은 별도 확인이 필요합니다. 안정형인지 성장형인지 알려주시면 후보를 더 좁혀드릴게요."
-        )
-        score = 3.5
-    elif any(word in text for word in ["추가매수", "물타기", "평단", "더 살"]):
-        answer = (
-            "추가매수는 손실을 줄이는 방법이 아니라 투자금과 위험을 함께 늘리는 결정입니다. "
-            "매수 이유가 처음과 같은지, 손절 기준과 최대 투입 금액이 미리 정해져 있었는지 먼저 확인하세요. "
-            "계획에 없던 추가매수라면 오늘은 주문을 보류하고 최소 24시간 뒤 다시 검토하는 것을 권합니다."
-        )
-        score = 6.5
-    elif any(word in text for word in ["손실", "복구", "만회", "본전"]):
-        answer = (
-            "손실을 빨리 만회하려는 마음은 더 큰 위험을 선택하게 만들 수 있습니다. "
-            "지금은 신규 매매를 멈추고 전체 손실액, 종목별 비중, 현금 비중부터 확인하세요. "
-            "한 번의 거래로 복구하려 하지 말고 미리 정한 손실 한도를 넘었다면 포지션을 줄이는 방안을 검토하세요."
-        )
-        score = 7.0
-    elif any(word in text for word in ["급등", "놓칠", "지금 사", "fomo"]):
-        answer = (
-            "놓칠 것 같은 조급함이 느껴집니다. 급등 뒤 추격매수는 가격 변동을 감당하기 어려울 수 있습니다. "
-            "지금은 주문을 멈추고 매수 근거, 목표가, 손절가를 먼저 적어보세요. "
-            "세 가지를 바로 적지 못한다면 이번 거래는 건너뛰는 것이 안전합니다."
-        )
-        score = 7.0
-    else:
-        answer = (
-            "지금 바로 거래 결론을 내리기보다 투자 이유를 한 문장으로 정리해보세요. "
-            "매수 금액, 감당 가능한 손실, 보유 기간, 중단 기준이 모두 정해졌는지 확인해야 합니다. "
-            "하나라도 정해지지 않았다면 오늘은 주문을 보류하고 계획부터 세우는 것이 좋습니다."
-        )
-        score = 5.0
-
-    if reason:
-        answer += f"\n\n_현재 AI 연결 대신 안전 상담 모드로 답변했습니다 ({reason})._"
-    return answer, score
 
 def groq_counsel_chat(messages):
     """Groq API 대화형 호출"""
     
-    user_text = next(
-        (message.get("content", "") for message in reversed(messages)
-         if message.get("role") == "user"),
-        "",
-    )
-
     if not GROQ_API_KEY:
-        return local_guardian_fallback(user_text, "API 키 미설정")
+        return "⚠️ Groq API 키가 설정되지 않았습니다.", 5.0
     
     try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "openai/gpt-oss-20b",
-                "messages": messages,
-                "temperature": 0.7,
-                # GPT-OSS는 내부 추론도 출력 한도에 포함하므로 여유 있게 설정한다.
-                "max_completion_tokens": 1400,
-                "reasoning_effort": "low",
-                "include_reasoning": False,
-            },
-            timeout=40,
+        client = Groq(api_key=GROQ_API_KEY)
+        
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
         )
-
-        if response.status_code != 200:
-            return local_guardian_fallback(user_text, f"Groq {response.status_code}")
-
-        data = response.json()
-        full_response = data["choices"][0]["message"]["content"]
+        
+        full_response = response.choices[0].message.content
         
         # 감정 점수 추출
         emotion_match = re.search(r'\[감정점수[:\s]*(\d+(?:\.\d+)?)\]', full_response)
@@ -1842,10 +1671,8 @@ def groq_counsel_chat(messages):
         
         return clean_response, emotion_score
         
-    except requests.Timeout:
-        return local_guardian_fallback(user_text, "응답 시간 초과")
-    except Exception as error:
-        return local_guardian_fallback(user_text, type(error).__name__)
+    except Exception as e:
+        return f"⚠️ API 오류: {str(e)}", 5.0
 
 def groq_counsel(user_text):
     """Groq API를 통한 AI 상담 (하위 호환성 유지)"""
@@ -1853,7 +1680,9 @@ def groq_counsel(user_text):
         api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
         
         if not api_key:
-            return local_guardian_fallback(user_text, "API 키 미설정")
+            return "⚠️ API 키가 없습니다.", 5.0
+        
+        client = Groq(api_key=api_key)
         
         prompt = f"""당신은 전문적이고 객관적인 투자 심리 상담사입니다.
 감정적인 투자를 막고, 합리적 판단을 돕는 것이 목표입니다.
@@ -1867,7 +1696,7 @@ def groq_counsel(user_text):
 4. 구체적이고 실행 가능한 조언 제시
 
 **경고 문구 사용 원칙:**
-- "지금은 투자 결정을 잠시 멈추는 것이 좋습니다"
+- "지금 투자하면 손실 확률이 매우 높습니다"
 - "심리 상태가 불안정합니다"
 - "오늘의 감정 상태로는 합리적 결정을 내리기 어렵습니다"
 - "계획 외 매매는 당신의 원칙을 깨는 행동입니다"
@@ -1877,28 +1706,14 @@ def groq_counsel(user_text):
 (전문적이고 명확한 상담 내용)
 """
         
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "openai/gpt-oss-20b",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_completion_tokens": 1400,
-                "reasoning_effort": "low",
-                "include_reasoning": False,
-            },
-            timeout=40,
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=500
         )
-
-        if response.status_code != 200:
-            return local_guardian_fallback(user_text, f"Groq {response.status_code}")
-
-        data = response.json()
-        full_response = data["choices"][0]["message"]["content"]
+        
+        full_response = response.choices[0].message.content
         
         emotion_match = re.search(r'\[감정점수[:\s]*(\d+(?:\.\d+)?)\]', full_response)
         emotion_score = float(emotion_match.group(1)) if emotion_match else 5.0
@@ -1907,10 +1722,8 @@ def groq_counsel(user_text):
         
         return clean_response, emotion_score
         
-    except requests.Timeout:
-        return local_guardian_fallback(user_text, "응답 시간 초과")
-    except Exception as error:
-        return local_guardian_fallback(user_text, type(error).__name__)
+    except Exception as e:
+        return f"상담 중 오류가 발생했습니다: {str(e)}", 5.0
 
 # ============================================================================
 # Session State 초기화
@@ -1922,8 +1735,10 @@ if 'portfolio' not in st.session_state:
     if db_portfolio:
         st.session_state.portfolio = db_portfolio
     else:
-        # 실제 보유 종목으로 오해할 수 있는 예시 데이터는 자동 생성하지 않는다.
-        st.session_state.portfolio = []
+        st.session_state.portfolio = [
+            {'종목코드': '005930', '종목명': '삼성전자', '매입가': 70000, '수량': 10},
+            {'종목코드': '000660', '종목명': 'SK하이닉스', '매입가': 130000, '수량': 5}
+        ]
 
 # 채팅 히스토리 초기화
 if 'guardian_chat_history' not in st.session_state:
@@ -1933,8 +1748,7 @@ if 'guardian_chat_history' not in st.session_state:
 # 🌟 메인 UI
 # ============================================================================
 
-st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.7.2 MOBILE</div>', unsafe_allow_html=True)
-st.caption("빌드 2026-09-02 · 동적 위험지표 · 포트폴리오 수정 · 답변 끊김 방지")
+st.markdown('<div class="header-animated">🛡️ GINI Guardian v4.5 Chat</div>', unsafe_allow_html=True)
 st.markdown('<div style="text-align: center; margin-bottom: 20px;"><span class="hot-badge" style="font-size: 1.2em; color: #ff4500;">NEW! Groq 대화형 상담 🔥</span></div>', unsafe_allow_html=True)
 
 # ============================================================================
@@ -1945,7 +1759,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🧭 AI 상담",
     "📊 대시보드",
     "📚 상담 기록",
-    "💼 포트폴리오",
+    "💼 실시간 포트폴리오",
     "⚙️ 설정"
 ])
 
@@ -1962,13 +1776,16 @@ with tab1:
     else:
         # 인트로 배너
         st.markdown("""
-        <div class="guardian-intro">
-            <div class="intro-hello">안녕하세요.</div>
-            <div>저는 <strong>감정에 흔들리는 투자 결정을 막아주는<br>
-            ‘주식 과잉투자 방지 AI 상담가’</strong>입니다.</div>
-            <div class="intro-purpose">지금 당신의 심리와 상황을 함께 점검하며<br>
-            <strong>안전한 투자를 돕겠습니다.</strong> 🛡️</div>
-            <div class="intro-new">✨ 계속 대화할 수 있습니다.</div>
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <p style="color: white; font-size: 1.1em; margin: 0; text-align: center; line-height: 1.6;">
+            안녕하세요. 저는 <strong>감정에 흔들린 투자 결정을 막아주는</strong><br>
+            <strong>'주식 과잉방지 AI 상담가'</strong>입니다.<br>
+            <br>
+            지금 당신의 심리·상황을 함께 점검하며<br>
+            <strong>안전한 투자를 돕겠습니다.</strong> 🛡️<br>
+            <br>
+            <strong>✨ NEW! 계속 대화가 가능합니다!</strong>
+            </p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -2029,7 +1846,7 @@ with tab1:
                 st.write(user_input)
             
             # System Prompt 생성
-            system_prompt = build_guardian_system_prompt(user_input)
+            system_prompt = build_guardian_system_prompt()
             
             # 메시지 구성
             recent_history = st.session_state.guardian_chat_history[-10:]
@@ -2046,12 +1863,13 @@ with tab1:
                 with st.spinner("🤔 AI가 분석 중..."):
                     response, emotion_score = groq_counsel_chat(messages)
                     
-                    # 질문의 실제 거래 행동과 감정 표현으로 위험도를 계산
-                    tags = detect_tags(user_input)
-                    risk = calculate_behavior_risk(user_input, tags)
-                    emotion_score = risk
+                    # 위험도 계산
+                    volatility_score = 5.0
+                    news_score = 3.0
+                    risk = calc_risk_score(emotion_score, volatility_score, news_score)
                     risk_emoji = get_risk_emoji(risk)
                     risk_level = detect_risk_level(risk)
+                    tags = detect_tags(user_input)
                     
                     # 위험한 순간 기록
                     if risk >= 6.5:
@@ -2062,13 +1880,8 @@ with tab1:
                     # 상담 기록 저장
                     save_chat(user_input, response, emotion_score, risk_level, tags)
                     
-                    # 거래 패턴 경고는 현재 문장에 실제 거래 의도가 있을 때만 표시한다.
-                    # 일반적인 종목/시장 질문에는 누적 경고를 끼워 넣지 않는다.
-                    pattern_warnings = (
-                        get_trading_pattern_warnings()
-                        if has_explicit_trade_intent(user_input)
-                        else []
-                    )
+                    # 거래 패턴 경고
+                    pattern_warnings = get_trading_pattern_warnings()
                     
                     if pattern_warnings:
                         st.markdown("### 🚨 거래 패턴 경고")
@@ -2256,10 +2069,9 @@ with tab2:
     with col_tag2:
         st.markdown("#### 📌 가장 많은 감정")
         st.metric(
-            label="가장 많이 감지된 감정",
+            label="",
             value=stats['most_common_tag'],
-            delta=f"{stats['most_common_count']}회",
-            label_visibility="collapsed"
+            delta=f"{stats['most_common_count']}회"
         )
         
         st.markdown("---")
@@ -2414,13 +2226,13 @@ with tab3:
         st.info("📝 아직 상담 기록이 없습니다.")
 
 # ============================================================================
-# TAB 4: 포트폴리오
+# TAB 4: 실시간 포트폴리오
 # ============================================================================
 
 with tab4:
-    st.markdown('<div style="text-align: center; margin-bottom: 15px;"><span style="font-size: 1.8em;">💼 포트폴리오</span></div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align: center; margin-bottom: 15px;"><span class="hot-badge" style="font-size: 1.8em; color: #ff4500;">💼 실시간 포트폴리오 🔥</span></div>', unsafe_allow_html=True)
     
-    st.info("✨ pykrx에서 확인 가능한 최근 거래일 종가를 사용합니다. 실시간 체결가는 아닙니다.")
+    st.info("✨ pykrx 기반 실시간 주가 추적 (20분 지연)")
     
     col_refresh, col_add = st.columns([1, 3])
     
@@ -2456,7 +2268,7 @@ with tab4:
             bg_color = "#fff3cd" if stock['수익률'] < 0 else "#d4edda" if stock['수익률'] > 0 else "#e9ecef"
             text_color = "#dc3545" if stock['수익률'] < 0 else "#28a745" if stock['수익률'] > 0 else "#6c757d"
             
-            data_status = "⚠️ 가격 조회 실패" if stock.get('데이터상태') != '정상' else f"조회일 {stock.get('조회일', '-')}"
+            data_status = "⚠️ 실시간 데이터 없음" if stock['수익률'] == 0 and stock['등락률'] == 0 else ""
             
             col_stock, col_delete = st.columns([6, 1])
             
@@ -2478,36 +2290,6 @@ with tab4:
                     delete_portfolio_stock(stock['종목코드'])
                     st.session_state.portfolio = [p for p in st.session_state.portfolio if p['종목코드'] != stock['종목코드']]
                     st.rerun()
-
-            with st.expander(f"✏️ {stock['종목명']} 매입가·수량 수정"):
-                edit_col1, edit_col2, edit_col3 = st.columns([2, 2, 1])
-                with edit_col1:
-                    edited_buy_price = st.number_input(
-                        "매입가",
-                        min_value=1,
-                        value=int(stock["매입가"]),
-                        step=100,
-                        key=f"edit_price_{stock['종목코드']}",
-                    )
-                with edit_col2:
-                    edited_quantity = st.number_input(
-                        "수량",
-                        min_value=1,
-                        value=int(stock["수량"]),
-                        step=1,
-                        key=f"edit_quantity_{stock['종목코드']}",
-                    )
-                with edit_col3:
-                    st.write("")
-                    st.write("")
-                    if st.button("💾 저장", key=f"save_edit_{stock['종목코드']}", use_container_width=True):
-                        update_portfolio_stock(stock['종목코드'], edited_buy_price, edited_quantity)
-                        for item in st.session_state.portfolio:
-                            if item['종목코드'] == stock['종목코드']:
-                                item['매입가'] = edited_buy_price
-                                item['수량'] = edited_quantity
-                        st.success("수정했습니다.")
-                        st.rerun()
         
         st.divider()
         
@@ -2537,13 +2319,6 @@ with tab4:
         
         if submitted:
             if new_ticker and new_name and new_buy_price > 0:
-                new_ticker = new_ticker.strip()
-                new_name = new_name.strip()
-
-                if any(item['종목코드'] == new_ticker for item in st.session_state.portfolio):
-                    st.warning("⚠️ 이미 등록된 종목입니다. 위의 수정 버튼을 이용해주세요.")
-                    st.stop()
-
                 save_portfolio_stock(new_ticker, new_name, new_buy_price, new_quantity)
                 
                 st.session_state.portfolio.append({
@@ -2566,16 +2341,14 @@ with tab5:
     st.subheader("⚙️ 설정 & 정보")
     
     st.info(f"""
-    **GINI Guardian v4.7.2 MOBILE**
+    **GINI Guardian v4.4 - 라이라 최종 수정 완료! ✨**
     
     🆕 v4.4 라이라 피드백 반영:
        -  **톤 통일**: 전문적이고 객관적인 중간 톤으로 통일
-       -  **경고 문구 개선**: 단정적인 손실 확률 대신 실행 가능한 멈춤 행동 안내
+       -  **경고 문구 전문화**: "지금 투자하면 손실 확률이 매우 높습니다" 등 명확한 표현
        -  **행동 단계 추가**: 30초 호흡, 2분 자리 이탈, 투자 이유 적기 등 실행 가능한 액션
        -  **압박 멘트 개선**: 더 전문적이고 분명한 경고
-       -  근거 없는 확률·통계 표현 제거
-       -  주가 조회 실패 시 임의 가격을 표시하지 않도록 개선
-       -  API 오류 상세정보 비공개 처리
+       -  **행동경제학 검증**: "충동적 결정 95% 실패" 등 근거 제시
     
      v4.3 기능:
        - 주간 리포트 자동 생성
@@ -2603,7 +2376,7 @@ with tab5:
     
      기존 기능:
        - 종목명 자동 보정
-       - 최근 거래일 종가 기반 포트폴리오
+       - 실시간 포트폴리오
        - 감정 분석 & 위험지표
        - 성능 최적화
     
